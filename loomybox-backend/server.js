@@ -3,7 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 
-require("./db"); // ensures schema + seed data exist before routes touch it
+const { initDb } = require("./db");
 
 const categoriesRouter = require("./routes/categories");
 const { router: vendorsRouter } = require("./routes/vendors");
@@ -29,6 +29,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Something went wrong on the server" });
 });
 
-app.listen(PORT, () => {
-  console.log(`Loomybox API listening on http://localhost:${PORT}`);
-});
+initDb()
+  .then(() => {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Loomybox API listening on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to start: could not initialise the database.", err);
+    process.exit(1);
+  });
