@@ -1,0 +1,321 @@
+// Prisma schema for Loomybox.com
+// Run `npx prisma migrate dev --name init` after setting DATABASE_URL in .env
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  VENDOR
+  ADMIN
+}
+
+enum VendorStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RequirementStatus {
+  OPEN
+  BOOKED
+  CLOSED
+}
+
+enum QuoteStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum PaymentStatus {
+  HELD
+  RELEASED
+  REFUNDED
+}
+
+enum DiscountType {
+  PERCENT
+  FLAT
+}
+
+enum PaymentPlan {
+  FULL
+  SPLIT // 50% now, 50% before the event
+}
+
+enum NotificationType {
+  QUOTE_RECEIVED
+  QUOTE_ACCEPTED
+  BOOKING_CONFIRMED
+  PAYMENT_REMINDER
+  EVENT_REMINDER
+  REVIEW_REQUEST
+  DISPUTE_FILED
+  MESSAGE_RECEIVED
+  VENDOR_APPROVED
+}
+
+model User {
+  id            Int            @id @default(autoincrement())
+  name          String
+  email         String         @unique
+  password      String
+  role          Role           @default(CUSTOMER)
+  phone         String?
+  createdAt     DateTime       @default(now())
+
+  vendorProfile VendorProfile?
+  requirements  Requirement[]
+  bookings      Booking[]      @relation("CustomerBookings")
+  reviews       Review[]
+  cart          Cart?
+  wishlist      WishlistItem[]
+  notifications Notification[]
+  sentMessages  Message[]      @relation("SentMessages")
+  conversations Conversation[] @relation("CustomerConversations")
+}
+
+model VendorProfile {
+  id            Int            @id @default(autoincrement())
+  userId        Int            @unique
+  user          User           @relation(fields: [userId], references: [id])
+  businessName  String
+  category      String         // e.g. "event", "birthday", "photography" — see CATEGORIES in assets/api.js
+  city          String
+  district      String?        // Kerala district, for the location filter (e.g. "Ernakulam")
+  pincode       String?        // postal code, for finer-grained location search
+  description   String?
+  status        VendorStatus   @default(PENDING)
+  rating        Float          @default(0)
+  reviewCount   Int            @default(0)
+  createdAt     DateTime       @default(now())
+
+  // Trust signals: response time is computed from how quickly a vendor sends
+  // a quote after a requirement is posted. completedBookingsCount is
+  // incremented whenever one of this vendor's bookings reaches COMPLETED.
+  respondedQuoteCount    Int   @default(0)
+  totalResponseMinutes   Float @default(0) // sum of (quote.createdAt - requirement.createdAt) in minutes, divide by respondedQuoteCount for the average shown on the vendor card
+  completedBookingsCount Int   @default(0)
+
+  packages      Package[]
+  quotes        Quote[]
+  bookings      Booking[]
+  blockedDates  BlockedDate[]
+  conversations Conversation[]
+}
+
+model Package {
+  id            Int           @id @default(autoincrement())
+  vendorId      Int
+  vendor        VendorProfile @relation(fields: [vendorId], references: [id])
+  name          String
+  description   String?
+  price         Float
+  originalPrice Float?        // set this higher than price to show a strikethrough + discount badge, Flipkart-style
+  imageUrl      String?       // a data URL (base64) for local dev, or a real hosted image URL in production
+  createdAt     DateTime      @default(now())
+
+  cartItems     CartItem[]
+  bookings      Booking[]
+  wishlistedBy  WishlistItem[]
+  images        PackageImage[]
+}
+
+model PackageImage {
+  id        Int     @id @default(autoincrement())
+  packageId Int
+  package   Package @relation(fields: [packageId], references: [id])
+  imageUrl  String  // data URL (base64) for local dev, or a hosted image URL in production
+  position  Int     @default(0) // display order in the gallery
+}
+
+model BlockedDate {
+  id       Int           @id @default(autoincrement())
+  vendorId Int
+  vendor   VendorProfile @relation(fields: [vendorId], references: [id])
+  date     DateTime      // the calendar day this vendor is unavailable
+  reason   String?       // optional note, e.g. "already booked"
+
+  @@unique([vendorId, date])
+}
+
+model Conversation {
+  id         Int       @id @default(autoincrement())
+  customerId Int
+  customer   User      @relation("CustomerConversations", fields: [customerId], references: [id])
+  vendorId   Int
+  vendor     VendorProfile @relation(fields: [vendorId], references: [id])
+  createdAt  DateTime  @default(now())
+  messages   Message[]
+
+  @@unique([customerId, vendorId])
+}
+
+model Message {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  senderId       Int
+  sender         User         @relation("SentMessages", fields: [senderId], references: [id])
+  content        String
+  read           Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  message   String
+  link      String?          // relative frontend path to send them to when clicked, e.g. "bookings.html"
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+}
+
+model Requirement {
+  id             Int                @id @default(autoincrement())
+  customerId     Int
+  customer       User               @relation(fields: [customerId], references: [id])
+  eventType      String             // "wedding" | "corporate" | "birthday" | "other"
+  eventDate      DateTime
+  city           String
+  guestCount     Int?
+  budgetMin      Float?
+  budgetMax      Float?
+  servicesNeeded String?            // comma-separated, e.g. "decor,catering,photography"
+  notes          String?
+  status         RequirementStatus  @default(OPEN)
+  createdAt      DateTime           @default(now())
+
+  quotes         Quote[]
+}
+
+model Quote {
+  id            Int         @id @default(autoincrement())
+  requirementId Int
+  requirement   Requirement @relation(fields: [requirementId], references: [id])
+  vendorId      Int
+  vendor        VendorProfile @relation(fields: [vendorId], references: [id])
+  price         Float
+  message       String?
+  status        QuoteStatus @default(PENDING)
+  createdAt     DateTime    @default(now())
+
+  booking       Booking?
+}
+
+model Booking {
+  id               Int           @id @default(autoincrement())
+  // A booking comes from EITHER an accepted custom quote OR a direct package
+  // purchase through the cart (like buying a product on Flipkart). Exactly
+  // one of quoteId / packageId is set, enforced in the route handlers.
+  quoteId          Int?          @unique
+  quote            Quote?        @relation(fields: [quoteId], references: [id])
+  packageId        Int?
+  package          Package?      @relation(fields: [packageId], references: [id])
+  customerId       Int
+  customer         User          @relation("CustomerBookings", fields: [customerId], references: [id])
+  vendorId         Int
+  vendor           VendorProfile @relation(fields: [vendorId], references: [id])
+  totalAmount      Float
+  commissionAmount Float
+  status           BookingStatus @default(PENDING_PAYMENT)
+  eventDate        DateTime?
+  disputeReason    String?
+  couponCode       String?
+  discountAmount   Float         @default(0)
+  paymentPlan      PaymentPlan   @default(FULL)
+  balanceDue       Float         @default(0) // remaining amount owed, only nonzero for SPLIT plans until paid
+  createdAt        DateTime      @default(now())
+
+  payment          Payment?
+  review            Review?
+}
+
+model Payment {
+  id          Int           @id @default(autoincrement())
+  bookingId   Int           @unique
+  booking     Booking       @relation(fields: [bookingId], references: [id])
+  amountPaid  Float
+  status      PaymentStatus @default(HELD)
+  paidAt      DateTime      @default(now())
+  releasedAt  DateTime?
+}
+
+model Coupon {
+  id         Int          @id @default(autoincrement())
+  code       String       @unique
+  type       DiscountType
+  value      Float        // percent (e.g. 10 = 10%) or flat rupee amount, depending on type
+  minOrder   Float?       // minimum cart subtotal required to use this coupon
+  maxUses    Int?         // total redemptions allowed across all customers, null = unlimited
+  usedCount  Int          @default(0)
+  expiresAt  DateTime?
+  active     Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+}
+
+model Cart {
+  id                Int        @id @default(autoincrement())
+  customerId        Int        @unique
+  customer          User       @relation(fields: [customerId], references: [id])
+  items             CartItem[]
+  appliedCouponCode String?
+  createdAt         DateTime   @default(now())
+}
+
+model CartItem {
+  id        Int      @id @default(autoincrement())
+  cartId    Int
+  cart      Cart     @relation(fields: [cartId], references: [id])
+  packageId Int
+  package   Package  @relation(fields: [packageId], references: [id])
+  eventDate DateTime? // when the customer wants this service for their event
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@unique([cartId, packageId]) // adding the same package twice just isn't meaningful here
+}
+
+model WishlistItem {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  customer   User     @relation(fields: [customerId], references: [id])
+  packageId  Int
+  package    Package  @relation(fields: [packageId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, packageId])
+}
+
+model Setting {
+  key   String @id
+  value String // stored as plain text or JSON-encoded, parsed by the frontend as needed
+}
+
+model Review {
+  id         Int      @id @default(autoincrement())
+  bookingId  Int      @unique
+  booking    Booking  @relation(fields: [bookingId], references: [id])
+  customerId Int
+  customer   User     @relation(fields: [customerId], references: [id])
+  rating     Int      // 1-5
+  comment    String?
+  createdAt  DateTime @default(now())
+}
