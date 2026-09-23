@@ -3,10 +3,11 @@ const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 
-const { initDb } = require("./db");
+require("./db"); // ensures schema + seed data exist before routes touch it
 
 const categoriesRouter = require("./routes/categories");
 const { router: vendorsRouter } = require("./routes/vendors");
+const { router: customersRouter } = require("./routes/customers");
 const bookingsRouter = require("./routes/bookings");
 
 const app = express();
@@ -19,6 +20,7 @@ app.use(morgan("dev"));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 app.use("/api/categories", categoriesRouter);
 app.use("/api/vendors", vendorsRouter);
+app.use("/api/customers", customersRouter);
 app.use("/api/bookings", bookingsRouter);
 
 app.use((req, res) => res.status(404).json({ error: "Not found" }));
@@ -29,13 +31,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Something went wrong on the server" });
 });
 
-initDb()
-  .then(() => {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Loomybox API listening on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error("Failed to start: could not initialise the database.", err);
-    process.exit(1);
-  });
+app.listen(PORT, () => {
+  console.log(`Loomybox API listening on http://localhost:${PORT}`);
+});

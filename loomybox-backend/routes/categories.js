@@ -1,16 +1,12 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
 
 const router = express.Router();
 
 // GET /api/categories
-router.get("/", async (req, res, next) => {
-  try {
-    const { rows } = await pool.query("SELECT * FROM categories ORDER BY name");
-    res.json(rows);
-  } catch (err) {
-    next(err);
-  }
+router.get("/", (req, res) => {
+  const categories = db.prepare("SELECT * FROM categories ORDER BY name").all();
+  res.json(categories);
 });
 
 module.exports = router;
